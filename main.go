@@ -34,7 +34,7 @@ func main() {
 }
 
 func connection_handler(conn net.Conn) {
-	conn.Write([]byte("220 You are connected!\n"))
+	conn.Write([]byte(successful_connection().GenerateMsgStr()))
 	rcvB := make([]byte, 1024)
 	for {
 		n, err := conn.Read(rcvB)
@@ -43,14 +43,8 @@ func connection_handler(conn net.Conn) {
 		}
 		input := string(rcvB[:n])
 		words := strings.Split(input, " ")
-		fmt.Println(words[0])
-		if len(words) > 1 {
-			fmt.Println(strings.Compare(words[1], "anonymous\r\n"))
-		}
 		response := input_handler(words)
-		responseStr := response.GenerateMsgStr()
-		fmt.Println(responseStr)
-		conn.Write([]byte(responseStr)) //string(code) does not WORK PROPERLY AHHHHH
+		conn.Write([]byte(response.GenerateMsgStr()))
 	}
 }
 
@@ -64,6 +58,10 @@ func input_handler(input []string) response {
 	} else {
 		return response{code: 500, msg: "Syntax error"}
 	}
+}
+
+func successful_connection() response {
+	return response{code: 220, msg: " You are connected!"}
 }
 
 func login_handler(input []string) response {
