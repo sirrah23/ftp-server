@@ -54,6 +54,10 @@ func connection_handler(conn net.Conn) {
 		input := string(rcvB[:n])
 		fmt.Println(input)
 		words := strings.Split(input, " ")
+		if words[0] == "QUIT\r\n" {
+			end_connection(conn)
+			return
+		}
 		input_handler(words, c, conn)
 	}
 }
@@ -118,10 +122,10 @@ func data_handler(ln net.Listener, c chan int) {
 	} else {
 		fmt.Println("Passive connection accepted!")
 	}
+	defer conn.Close()
 	<-c
 	file_list_str := get_files_dir(".")
 	conn.Write([]byte(file_list_str))
-	conn.Close()
 	c <- 0
 	return
 }
@@ -158,4 +162,10 @@ func get_files_dir(dir string) string {
 	}
 	CRLF := "\r\n"
 	return strings.Join(file_list, CRLF) + CRLF
+}
+
+func end_connection(conn net.Conn) {
+	defer conn.Close()
+	response := GenerateMsgStr(221, "Quitting!")
+	conn.Write([]byte(response))
 }
