@@ -52,9 +52,10 @@ func connection_handler(conn net.Conn) {
 			//handle error
 		}
 		input := string(rcvB[:n])
+		input = clean_CRLF(input)
 		fmt.Println(input)
 		words := strings.Split(input, " ")
-		if words[0] == "QUIT\r\n" {
+		if words[0] == "QUIT" {
 			end_connection(conn)
 			return
 		}
@@ -65,18 +66,16 @@ func connection_handler(conn net.Conn) {
 func input_handler(input []string, c chan int, conn net.Conn) {
 	if input[0] == "USER" {
 		login_handler(input, conn)
-	} else if strings.Compare(input[0], "SYST\r\n") == 0 { //TODO: Clean \r\n upfront
-		response := GenerateMsgStr(215, "Special FTP Server :)")
-		conn.Write([]byte(response))
-	} else if strings.Compare(input[0], "PWD\r\n") == 0 {
+	} else if strings.Compare(input[0], "SYST") == 0 {
+		syst_handler(conn)
+	} else if strings.Compare(input[0], "PWD") == 0 {
 		pwd_handler(input, conn)
-	} else if strings.Compare(input[0], "PASV\r\n") == 0 {
+	} else if strings.Compare(input[0], "PASV") == 0 {
 		passive_handler(conn, c)
-	} else if strings.Compare(input[0], "LIST\r\n") == 0 {
+	} else if strings.Compare(input[0], "LIST") == 0 {
 		ls_handler(conn, c)
 	} else {
-		response := GenerateMsgStr(500, "Syntax error")
-		conn.Write([]byte(response))
+		syntax_err_handler(conn)
 	}
 }
 
@@ -87,7 +86,7 @@ func successful_connection(conn net.Conn) {
 
 func login_handler(input []string, conn net.Conn) {
 	var response string
-	if strings.Compare(input[1], "anonymous\r\n") == 0 {
+	if strings.Compare(input[1], "anonymous") == 0 {
 		response = GenerateMsgStr(230, "Login successful!")
 	} else {
 		response = GenerateMsgStr(530, "Login unsuccessful")
@@ -168,4 +167,19 @@ func end_connection(conn net.Conn) {
 	defer conn.Close()
 	response := GenerateMsgStr(221, "Quitting!")
 	conn.Write([]byte(response))
+}
+
+func syntax_err_handler(conn net.Conn) {
+	response := GenerateMsgStr(500, "Syntax error")
+	conn.Write([]byte(response))
+}
+
+func syst_handler(conn net.Conn) {
+	response := GenerateMsgStr(215, "Special FTP Server :)")
+	conn.Write([]byte(response))
+}
+
+func clean_CRLF(s string) string {
+	CRLF := "\r\n"
+	return strings.Replace(s, CRLF, "", -1)
 }
