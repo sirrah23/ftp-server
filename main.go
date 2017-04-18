@@ -5,32 +5,23 @@ import "fmt"
 import "strings"
 import "strconv"
 import "os"
+import "io/ioutil"
 
-type response struct {
-	code int
-	msg  string
-}
-
-type data_connection struct {
-	c chan int
-}
-
-func (r response) GenerateMsgStr() string {
+func GenerateMsgStr(code int, msg string) string {
 	//TODO: Sprintf instead
-	return strconv.Itoa(r.code) + " " + r.msg + "\r\n"
+	return strconv.Itoa(code) + " " + msg + "\r\n"
 }
 
-func passive_handler() (response, chan int) {
+func passive_handler(conn net.Conn, c chan int) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Println(err)
-		return response{code: 500, msg: "Cannot establish a port for data retrieval"}, nil
+		response := GenerateMsgStr(500, "Cannot establish a port for data retrieval")
+		conn.Write([]byte(response))
 	}
-	fmt.Println(ln.Addr().String())
 	address := port_split_str(ln.Addr().String())
-	c := make(chan int)
 	go data_handler(ln, c)
-	return response{code: 227, msg: "Entering Passive Mode (" + address + ")"}, c
+	response := GenerateMsgStr(227, "Entering Passive Mode ("+address+")")
+	conn.Write([]byte(response))
 }
 
 func main() {
@@ -52,10 +43,9 @@ func main() {
 }
 
 func connection_handler(conn net.Conn) {
-	conn.Write([]byte(successful_connection().GenerateMsgStr()))
+	successful_connection(conn)
 	rcvB := make([]byte, 1024)
-	var c chan int = nil
-	var r response
+	c := make(chan int)
 	for {
 		n, err := conn.Read(rcvB)
 		if err != nil {
@@ -64,52 +54,50 @@ func connection_handler(conn net.Conn) {
 		input := string(rcvB[:n])
 		fmt.Println(input)
 		words := strings.Split(input, " ")
-		r, c = input_handler(words, c, conn)
-		if r.code != -1 {
-			conn.Write([]byte(r.GenerateMsgStr()))
-		}
+		input_handler(words, c, conn)
 	}
 }
 
-func input_handler(input []string, c chan int, conn net.Conn) (response, chan int) {
+func input_handler(input []string, c chan int, conn net.Conn) {
 	if input[0] == "USER" {
-		return login_handler(input), nil
+		login_handler(input, conn)
 	} else if strings.Compare(input[0], "SYST\r\n") == 0 { //TODO: Clean \r\n upfront
-		return response{code: 215, msg: "Special FTP Server :)"}, nil
+		response := GenerateMsgStr(215, "Special FTP Server :)")
+		conn.Write([]byte(response))
 	} else if strings.Compare(input[0], "PWD\r\n") == 0 {
-		return pwd_handler(input), nil
+		pwd_handler(input, conn)
 	} else if strings.Compare(input[0], "PASV\r\n") == 0 {
-		return passive_handler()
+		passive_handler(conn, c)
 	} else if strings.Compare(input[0], "LIST\r\n") == 0 {
-		conn.Write([]byte("150 File list send starting\r\n"))
-		c <- 0
-		<-c
-		close(c)
-		conn.Write([]byte("226 File list complete\r\n"))
-		return response{code: -1, msg: ""}, nil
+		ls_handler(conn, c)
 	} else {
-		return response{code: 500, msg: "Syntax error"}, nil
+		response := GenerateMsgStr(500, "Syntax error")
+		conn.Write([]byte(response))
 	}
 }
 
-func successful_connection() response {
-	return response{code: 220, msg: " You are connected!"}
+func successful_connection(conn net.Conn) {
+	response := GenerateMsgStr(220, "You are connected!")
+	conn.Write([]byte(response))
 }
 
-func login_handler(input []string) response {
+func login_handler(input []string, conn net.Conn) {
+	var response string
 	if strings.Compare(input[1], "anonymous\r\n") == 0 {
-		return response{code: 230, msg: "Login successful"}
+		response = GenerateMsgStr(230, "Login successful!")
 	} else {
-		return response{code: 530, msg: "Login successful"}
+		response = GenerateMsgStr(530, "Login unsuccessful")
 	}
+	conn.Write([]byte(response))
 }
 
-func pwd_handler(input []string) response {
+func pwd_handler(input []string, conn net.Conn) {
 	dir, err := os.Getwd()
 	if err != nil {
 		//handle error
 	}
-	return response{code: 257, msg: dir}
+	response := GenerateMsgStr(257, dir)
+	conn.Write([]byte(response))
 }
 
 func port_address_str(host_port string) (addr_str string) {
@@ -131,7 +119,8 @@ func data_handler(ln net.Listener, c chan int) {
 		fmt.Println("Passive connection accepted!")
 	}
 	<-c
-	conn.Write([]byte("file.txt\r\n"))
+	file_list_str := get_files_dir(".")
+	conn.Write([]byte(file_list_str))
 	conn.Close()
 	c <- 0
 	return
@@ -145,4 +134,28 @@ func port_split_str(address_str string) string {
 	p1 := strconv.Itoa(int(port16 >> 8))
 	p2 := strconv.Itoa(int(port16 << 8 >> 8))
 	return address + "," + p1 + "," + p2
+}
+
+func ls_handler(conn net.Conn, c chan int) {
+	var response string
+	response = GenerateMsgStr(150, "File list send starting")
+	conn.Write([]byte(response))
+	c <- 0
+	<-c
+	response = GenerateMsgStr(226, "File list send complete")
+	conn.Write([]byte(response))
+}
+
+func get_files_dir(dir string) string {
+	var file_list []string
+	files, err := ioutil.ReadDir(".")
+	if err != nil {
+		fmt.Println("Something went wrong during ls!")
+		return ""
+	}
+	for _, file := range files {
+		file_list = append(file_list, file.Name())
+	}
+	CRLF := "\r\n"
+	return strings.Join(file_list, CRLF) + CRLF
 }
