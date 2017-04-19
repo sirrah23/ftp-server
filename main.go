@@ -70,6 +70,8 @@ func input_handler(input []string, c chan int, conn net.Conn) {
 		syst_handler(conn)
 	} else if strings.Compare(input[0], "PWD") == 0 {
 		pwd_handler(input, conn)
+	} else if strings.Compare(input[0], "CWD") == 0 {
+		cwd_handler(input, conn)
 	} else if strings.Compare(input[0], "PASV") == 0 {
 		passive_handler(conn, c)
 	} else if strings.Compare(input[0], "LIST") == 0 {
@@ -101,6 +103,17 @@ func pwd_handler(input []string, conn net.Conn) {
 	}
 	response := GenerateMsgStr(257, dir)
 	conn.Write([]byte(response))
+}
+
+func cwd_handler(input []string, conn net.Conn) {
+	dir := input[1]
+	err := os.Chdir(dir)
+	if err != nil {
+		conn.Write([]byte(GenerateMsgStr(550, "Change directory failed")))
+		return
+	}
+	conn.Write([]byte(GenerateMsgStr(250, "Success")))
+
 }
 
 func port_address_str(host_port string) (addr_str string) {
