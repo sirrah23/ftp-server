@@ -81,6 +81,10 @@ func input_handler(input []string, data_conn_ch chan data_conn_info, conn net.Co
 		passive_handler(conn, data_conn_ch)
 	} else if strings.Compare(input[0], "LIST") == 0 {
 		ls_handler(conn, data_conn_ch)
+	} else if strings.Compare(input[0], "RETR") == 0 {
+		get_handler(input, conn, data_conn_ch)
+	} else if strings.Compare(input[0], "TYPE") == 0 {
+		type_handler(conn)
 	} else {
 		syntax_err_handler(conn)
 	}
@@ -143,12 +147,12 @@ func data_handler(ln net.Listener, data_conn_ch chan data_conn_info) {
 	data_conn_req := <-data_conn_ch
 	if data_conn_req.code == 0 {
 		send_file_list(conn)
+		data_conn_ch <- data_conn_info{code: 1, info: ""}
 	} else {
-		//fname := data_conn_req.info
-		//send_file(fname)
+		fname := data_conn_req.info
+		fmt.Println(fname)
+		data_conn_ch <- send_file(conn, fname)
 	}
-	data_conn_ch <- data_conn_info{}
-	return
 }
 
 func port_split_str(address_str string) string {
@@ -169,6 +173,28 @@ func ls_handler(conn net.Conn, data_conn_ch chan data_conn_info) {
 	<-data_conn_ch
 	response = GenerateMsgStr(226, "File list send complete")
 	conn.Write([]byte(response))
+}
+
+func get_handler(input []string, conn net.Conn, data_conn_ch chan data_conn_info) {
+	var response string
+	if len(input[1]) <= 1 || len(input[1]) == 0 {
+		response = GenerateMsgStr(450, "No file specified for retrieval")
+		conn.Write([]byte(response))
+		return
+	}
+	response = GenerateMsgStr(125, "Attempting file retrieval")
+	conn.Write([]byte(response))
+	data_conn_ch <- data_conn_info{code: 1, info: input[1]}
+	data_conn_resp := <-data_conn_ch
+	if data_conn_resp.code == -1 {
+		response = GenerateMsgStr(550, "Could not retrieve file")
+		conn.Write([]byte(response))
+		return
+	} else {
+		response = GenerateMsgStr(250, "File sent successfully")
+		conn.Write([]byte(response))
+		return
+	}
 }
 
 func get_files_dir(dir string) string {
@@ -209,4 +235,25 @@ func syst_handler(conn net.Conn) {
 func clean_CRLF(s string) string {
 	CRLF := "\r\n"
 	return strings.Replace(s, CRLF, "", -1)
+}
+
+func send_file(conn net.Conn, fname string) data_conn_info {
+	if _, err := os.Stat(fname); os.IsNotExist(err) {
+		return data_conn_info{code: -1, info: ""}
+	}
+	fdata, err := ioutil.ReadFile(fname)
+	if err != nil {
+		return data_conn_info{code: -1, info: ""}
+	}
+	n, err := conn.Write(fdata)
+	fmt.Println(n)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return data_conn_info{code: 1, info: ""}
+}
+
+func type_handler(conn net.Conn) {
+	response := GenerateMsgStr(200, "Type switch successful")
+	conn.Write([]byte(response))
 }
