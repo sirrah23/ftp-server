@@ -56,7 +56,6 @@ func connectionHandler(conn net.Conn) {
 		}
 		input := string(rcvB[:n])
 		input = cleanCRLF(input)
-		fmt.Println(input)
 		words := strings.Split(input, " ")
 		if words[0] == "QUIT" {
 			endConnection(conn)
@@ -108,12 +107,34 @@ func (f *ftpSession) pwdHandler(input []string, conn net.Conn) {
 	conn.Write([]byte(response))
 }
 
+func file_exists(file_name string) bool {
+	if _, err := os.Stat(file_name); os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func follow_path(base_dir string, rel_path string) (string, bool) {
+	path_to_follow := strings.Split(rel_path, "/")
+	curr_dir := base_dir
+	for _, p := range path_to_follow {
+		if p == ".." {
+			curr_dir = filepath.Dir(curr_dir)
+		} else if p != "." {
+			curr_dir = curr_dir + "/" + p
+		}
+		if !file_exists(curr_dir) {
+			return "", false
+		}
+	}
+	return curr_dir, true
+}
+
 // TODO: filepath.Clean(...) is a thing...look into it
-// TODO: Refactor file existence check into subfunction
 func (f *ftpSession) cwdHandler(input []string, conn net.Conn) {
 	//Switch directly to absolute directory - if it exists
 	if filepath.IsAbs(input[1]) {
-		if _, err := os.Stat(input[1]); os.IsNotExist(err) {
+		if !file_exists(input[1]) {
 			conn.Write([]byte(generateMsgStr(550, "Change directory failed")))
 			return
 		} else {
@@ -123,21 +144,15 @@ func (f *ftpSession) cwdHandler(input []string, conn net.Conn) {
 		}
 	}
 	// Follow along the path of relative directory
-	path_to_follow := strings.Split(input[1], "/")
-	curr_dir := f.dir
-	for _, p := range path_to_follow {
-		if p == ".." {
-			curr_dir = filepath.Dir(curr_dir)
-		} else if p != "." {
-			curr_dir = curr_dir + "/" + p
-		}
-		if _, err := os.Stat(curr_dir); os.IsNotExist(err) {
-			conn.Write([]byte(generateMsgStr(550, "Change directory failed")))
-			return
-		}
+	curr_dir, success := follow_path(f.dir, input[1])
+	if success {
+		f.dir = curr_dir
+		conn.Write([]byte(generateMsgStr(250, "Success")))
+		return
+	} else {
+		conn.Write([]byte(generateMsgStr(550, "Change directory failed")))
+		return
 	}
-	f.dir = curr_dir
-	conn.Write([]byte(generateMsgStr(250, "Success")))
 }
 
 func portAddressStr(host_port string) (addr_str string) {
@@ -165,7 +180,6 @@ func dataHandler(ln net.Listener, data_conn_ch chan dataConnInfo) {
 		data_conn_ch <- dataConnInfo{code: 1, info: ""}
 	} else {
 		fname := data_conn_req.info
-		fmt.Println(fname)
 		data_conn_ch <- sendFile(conn, fname)
 	}
 }
@@ -199,7 +213,19 @@ func (f *ftpSession) getHandler(input []string, conn net.Conn, data_conn_ch chan
 	}
 	response = generateMsgStr(125, "Attempting file retrieval")
 	conn.Write([]byte(response))
-	data_conn_ch <- dataConnInfo{code: 1, info: input[1]}
+	var file_to_get string
+	var success bool
+	if filepath.IsAbs(input[1]) {
+		file_to_get = input[1]
+	} else {
+		file_to_get, success = follow_path(f.dir, input[1])
+		if !success {
+			response = generateMsgStr(550, "Could not retrieve file")
+			conn.Write([]byte(response))
+			return
+		}
+	}
+	data_conn_ch <- dataConnInfo{code: 1, info: file_to_get}
 	data_conn_resp := <-data_conn_ch
 	if data_conn_resp.code == -1 {
 		response = generateMsgStr(550, "Could not retrieve file")
@@ -253,7 +279,7 @@ func cleanCRLF(s string) string {
 }
 
 func sendFile(conn net.Conn, fname string) dataConnInfo {
-	if _, err := os.Stat(fname); os.IsNotExist(err) {
+	if !file_exists(fname) {
 		return dataConnInfo{code: -1, info: ""}
 	}
 	fdata, err := ioutil.ReadFile(fname)
@@ -261,7 +287,6 @@ func sendFile(conn net.Conn, fname string) dataConnInfo {
 		return dataConnInfo{code: -1, info: ""}
 	}
 	n, err := conn.Write(fdata)
-	fmt.Println(n)
 	if err != nil {
 		fmt.Println(err)
 	}
