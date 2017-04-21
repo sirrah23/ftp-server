@@ -286,7 +286,7 @@ func sendFile(conn net.Conn, fname string) dataConnInfo {
 	if err != nil {
 		return dataConnInfo{code: -1, info: ""}
 	}
-	n, err := conn.Write(fdata)
+	_, err = conn.Write(fdata)
 	if err != nil {
 		fmt.Println(err)
 	}
