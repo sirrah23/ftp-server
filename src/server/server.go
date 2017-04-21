@@ -1,4 +1,4 @@
-package main
+package server
 
 import "net"
 import "fmt"
@@ -12,43 +12,25 @@ type data_conn_info struct {
 	info string
 }
 
-func GenerateMsgStr(code int, msg string) string {
+func generateMsgStr(code int, msg string) string {
 	//TODO: Sprintf instead
 	return strconv.Itoa(code) + " " + msg + "\r\n"
 }
 
-func passive_handler(conn net.Conn, data_conn_ch chan data_conn_info) {
+func passiveHandler(conn net.Conn, data_conn_ch chan data_conn_info) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		response := GenerateMsgStr(500, "Cannot establish a port for data retrieval")
+		response := generateMsgStr(500, "Cannot establish a port for data retrieval")
 		conn.Write([]byte(response))
 	}
-	address := port_split_str(ln.Addr().String())
-	go data_handler(ln, data_conn_ch)
-	response := GenerateMsgStr(227, "Entering Passive Mode ("+address+")")
+	address := portSplitStr(ln.Addr().String())
+	go dataHandler(ln, data_conn_ch)
+	response := generateMsgStr(227, "Entering Passive Mode ("+address+")")
 	conn.Write([]byte(response))
 }
 
-func main() {
-	fmt.Println("Connecting now!")
-	ln, err := net.Listen("tcp", ":21")
-	if err != nil {
-		// handle error
-		fmt.Println(err)
-	}
-	fmt.Println("Connected!")
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			// handle error
-			fmt.Println("Error!")
-		}
-		go connection_handler(conn)
-	}
-}
-
-func connection_handler(conn net.Conn) {
-	successful_connection(conn)
+func connectionHandler(conn net.Conn) {
+	successfulConnection(conn)
 	rcvB := make([]byte, 1024)
 	data_conn_ch := make(chan data_conn_info)
 	for {
@@ -57,75 +39,77 @@ func connection_handler(conn net.Conn) {
 			//handle error
 		}
 		input := string(rcvB[:n])
-		input = clean_CRLF(input)
+		input = cleanCRLF(input)
 		fmt.Println(input)
 		words := strings.Split(input, " ")
 		if words[0] == "QUIT" {
-			end_connection(conn)
+			endConnection(conn)
 			return
 		}
-		input_handler(words, data_conn_ch, conn)
+		inputHandler(words, data_conn_ch, conn)
 	}
 }
 
-func input_handler(input []string, data_conn_ch chan data_conn_info, conn net.Conn) {
+func inputHandler(input []string, data_conn_ch chan data_conn_info, conn net.Conn) {
 	if input[0] == "USER" {
-		login_handler(input, conn)
+		loginHandler(input, conn)
 	} else if strings.Compare(input[0], "SYST") == 0 {
-		syst_handler(conn)
+		systHandler(conn)
 	} else if strings.Compare(input[0], "PWD") == 0 {
-		pwd_handler(input, conn)
+		pwdHandler(input, conn)
 	} else if strings.Compare(input[0], "CWD") == 0 {
-		cwd_handler(input, conn)
+		cwdHandler(input, conn)
 	} else if strings.Compare(input[0], "PASV") == 0 {
-		passive_handler(conn, data_conn_ch)
+		passiveHandler(conn, data_conn_ch)
 	} else if strings.Compare(input[0], "LIST") == 0 {
-		ls_handler(conn, data_conn_ch)
+		lsHandler(conn, data_conn_ch)
 	} else if strings.Compare(input[0], "RETR") == 0 {
-		get_handler(input, conn, data_conn_ch)
+		getHandler(input, conn, data_conn_ch)
 	} else if strings.Compare(input[0], "TYPE") == 0 {
-		type_handler(conn)
+		typeHandler(conn)
 	} else {
-		syntax_err_handler(conn)
+		syntaxErrHandler(conn)
 	}
 }
 
-func successful_connection(conn net.Conn) {
-	response := GenerateMsgStr(220, "You are connected!")
+func successfulConnection(conn net.Conn) {
+	response := generateMsgStr(220, "You are connected!")
 	conn.Write([]byte(response))
 }
 
-func login_handler(input []string, conn net.Conn) {
+func loginHandler(input []string, conn net.Conn) {
 	var response string
 	if strings.Compare(input[1], "anonymous") == 0 {
-		response = GenerateMsgStr(230, "Login successful!")
+		response = generateMsgStr(230, "Login successful!")
 	} else {
-		response = GenerateMsgStr(530, "Login unsuccessful")
+		response = generateMsgStr(530, "Login unsuccessful")
 	}
 	conn.Write([]byte(response))
 }
 
-func pwd_handler(input []string, conn net.Conn) {
+func pwdHandler(input []string, conn net.Conn) {
 	dir, err := os.Getwd()
 	if err != nil {
 		//handle error
 	}
-	response := GenerateMsgStr(257, dir)
+	response := generateMsgStr(257, dir)
 	conn.Write([]byte(response))
 }
 
-func cwd_handler(input []string, conn net.Conn) {
+// BUG: If two users are on separate threads and one of
+//      them switches directories, they both switch directories...
+func cwdHandler(input []string, conn net.Conn) {
 	dir := input[1]
 	err := os.Chdir(dir)
 	if err != nil {
-		conn.Write([]byte(GenerateMsgStr(550, "Change directory failed")))
+		conn.Write([]byte(generateMsgStr(550, "Change directory failed")))
 		return
 	}
-	conn.Write([]byte(GenerateMsgStr(250, "Success")))
+	conn.Write([]byte(generateMsgStr(250, "Success")))
 
 }
 
-func port_address_str(host_port string) (addr_str string) {
+func portAddressStr(host_port string) (addr_str string) {
 	host_port_sp := strings.Split(host_port, ",") //h1, h2, h3, h4, p1, p2
 	p1, _ := strconv.Atoi(host_port_sp[4])
 	p1 *= 256
@@ -135,7 +119,7 @@ func port_address_str(host_port string) (addr_str string) {
 	return
 }
 
-func data_handler(ln net.Listener, data_conn_ch chan data_conn_info) {
+func dataHandler(ln net.Listener, data_conn_ch chan data_conn_info) {
 	conn, err := ln.Accept()
 	if err != nil {
 		fmt.Println(err)
@@ -146,16 +130,16 @@ func data_handler(ln net.Listener, data_conn_ch chan data_conn_info) {
 	defer conn.Close()
 	data_conn_req := <-data_conn_ch
 	if data_conn_req.code == 0 {
-		send_file_list(conn)
+		sendFileList(conn)
 		data_conn_ch <- data_conn_info{code: 1, info: ""}
 	} else {
 		fname := data_conn_req.info
 		fmt.Println(fname)
-		data_conn_ch <- send_file(conn, fname)
+		data_conn_ch <- sendFile(conn, fname)
 	}
 }
 
-func port_split_str(address_str string) string {
+func portSplitStr(address_str string) string {
 	addr_port := strings.Split(address_str, ":")
 	address := strings.Join(strings.Split(addr_port[0], "."), ",")
 	port_int, _ := strconv.Atoi(addr_port[1])
@@ -165,39 +149,39 @@ func port_split_str(address_str string) string {
 	return address + "," + p1 + "," + p2
 }
 
-func ls_handler(conn net.Conn, data_conn_ch chan data_conn_info) {
+func lsHandler(conn net.Conn, data_conn_ch chan data_conn_info) {
 	var response string
-	response = GenerateMsgStr(150, "File list send starting")
+	response = generateMsgStr(150, "File list send starting")
 	conn.Write([]byte(response))
 	data_conn_ch <- data_conn_info{code: 0, info: ""}
 	<-data_conn_ch
-	response = GenerateMsgStr(226, "File list send complete")
+	response = generateMsgStr(226, "File list send complete")
 	conn.Write([]byte(response))
 }
 
-func get_handler(input []string, conn net.Conn, data_conn_ch chan data_conn_info) {
+func getHandler(input []string, conn net.Conn, data_conn_ch chan data_conn_info) {
 	var response string
 	if len(input[1]) <= 1 || len(input[1]) == 0 {
-		response = GenerateMsgStr(450, "No file specified for retrieval")
+		response = generateMsgStr(450, "No file specified for retrieval")
 		conn.Write([]byte(response))
 		return
 	}
-	response = GenerateMsgStr(125, "Attempting file retrieval")
+	response = generateMsgStr(125, "Attempting file retrieval")
 	conn.Write([]byte(response))
 	data_conn_ch <- data_conn_info{code: 1, info: input[1]}
 	data_conn_resp := <-data_conn_ch
 	if data_conn_resp.code == -1 {
-		response = GenerateMsgStr(550, "Could not retrieve file")
+		response = generateMsgStr(550, "Could not retrieve file")
 		conn.Write([]byte(response))
 		return
 	} else {
-		response = GenerateMsgStr(250, "File sent successfully")
+		response = generateMsgStr(250, "File sent successfully")
 		conn.Write([]byte(response))
 		return
 	}
 }
 
-func get_files_dir(dir string) string {
+func getFilesDir(dir string) string {
 	var file_list []string
 	files, err := ioutil.ReadDir(".")
 	if err != nil {
@@ -211,33 +195,33 @@ func get_files_dir(dir string) string {
 	return strings.Join(file_list, CRLF) + CRLF
 }
 
-func send_file_list(conn net.Conn) {
-	file_list_str := get_files_dir(".")
+func sendFileList(conn net.Conn) {
+	file_list_str := getFilesDir(".")
 	conn.Write([]byte(file_list_str))
 }
 
-func end_connection(conn net.Conn) {
+func endConnection(conn net.Conn) {
 	defer conn.Close()
-	response := GenerateMsgStr(221, "Quitting!")
+	response := generateMsgStr(221, "Quitting!")
 	conn.Write([]byte(response))
 }
 
-func syntax_err_handler(conn net.Conn) {
-	response := GenerateMsgStr(500, "Syntax error")
+func syntaxErrHandler(conn net.Conn) {
+	response := generateMsgStr(500, "Syntax error")
 	conn.Write([]byte(response))
 }
 
-func syst_handler(conn net.Conn) {
-	response := GenerateMsgStr(215, "Special FTP Server :)")
+func systHandler(conn net.Conn) {
+	response := generateMsgStr(215, "Special FTP Server :)")
 	conn.Write([]byte(response))
 }
 
-func clean_CRLF(s string) string {
+func cleanCRLF(s string) string {
 	CRLF := "\r\n"
 	return strings.Replace(s, CRLF, "", -1)
 }
 
-func send_file(conn net.Conn, fname string) data_conn_info {
+func sendFile(conn net.Conn, fname string) data_conn_info {
 	if _, err := os.Stat(fname); os.IsNotExist(err) {
 		return data_conn_info{code: -1, info: ""}
 	}
@@ -253,7 +237,25 @@ func send_file(conn net.Conn, fname string) data_conn_info {
 	return data_conn_info{code: 1, info: ""}
 }
 
-func type_handler(conn net.Conn) {
-	response := GenerateMsgStr(200, "Type switch successful")
+func typeHandler(conn net.Conn) {
+	response := generateMsgStr(200, "Type switch successful")
 	conn.Write([]byte(response))
+}
+
+func Run() {
+	fmt.Println("Connecting now!")
+	ln, err := net.Listen("tcp", ":21")
+	if err != nil {
+		// handle error
+		fmt.Println(err)
+	}
+	fmt.Println("Connected!")
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			// handle error
+			fmt.Println("Error!")
+		}
+		go connectionHandler(conn)
+	}
 }
